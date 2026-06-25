@@ -17,9 +17,10 @@ app.get('/', (req, res) => {
       <head><title>WebRTC Server</title></head>
       <body style="background:#0a0a1a;color:#fff;font-family:Arial;display:flex;justify-content:center;align-items:center;height:100vh;text-align:center;">
         <div>
-          <h1>🎤 Batalha WebRTC</h1>
+          <h1 style="background:linear-gradient(135deg,#ff3b3b,#ff7c1e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">🎤 WebRTC Server</h1>
           <p style="color:#00ff88;">✅ Servidor rodando!</p>
           <p style="color:#666;font-size:12px;">Socket.IO ativo</p>
+          <p style="color:#666;font-size:12px;">Domínio: positive-forgiveness-production-de45.up.railway.app</p>
         </div>
       </body>
     </html>
@@ -30,7 +31,8 @@ app.get('/status', (req, res) => {
   res.json({
     status: 'online',
     timestamp: new Date().toISOString(),
-    salas: Object.keys(salas).length
+    salas: Object.keys(salas).length,
+    usuarios: Object.values(salas).reduce((acc, sala) => acc + Object.keys(sala.users).length, 0)
   });
 });
 
@@ -46,7 +48,7 @@ io.on('connection', (socket) => {
     socket.room = room;
     socket.user = data;
     
-    if (!salas[room]) salas[room] = { users: {}, offer: null };
+    if (!salas[room]) salas[room] = { users: {}, offer: null, offerFrom: null };
     salas[room].users[socket.id] = data;
     
     const usuarios = Object.values(salas[room].users);
@@ -54,6 +56,7 @@ io.on('connection', (socket) => {
     socket.to(room).emit('usuario_entrou', data);
     
     console.log(`📥 ${data.nome} entrou na sala ${room}`);
+    console.log(`👥 ${usuarios.length} usuários na sala`);
   });
 
   socket.on('webrtc_offer', (data) => {
@@ -66,17 +69,19 @@ io.on('connection', (socket) => {
         from_id: socket.id,
         from_nome: socket.user?.nome || 'Desconhecido'
       });
+      console.log(`📤 Offer enviado na sala ${room}`);
     }
   });
 
   socket.on('webrtc_answer', (data) => {
     const room = socket.room;
-    if (room) {
+    if (room && salas[room]) {
       socket.to(room).emit('webrtc_answer_received', {
         answer: data.answer,
         from_id: socket.id,
         from_nome: socket.user?.nome || 'Desconhecido'
       });
+      console.log(`📥 Answer enviado na sala ${room}`);
     }
   });
 
@@ -119,4 +124,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`📡 URL: https://positive-forgiveness-production-de45.up.railway.app`);
+  console.log(`📊 Status: https://positive-forgiveness-production-de45.up.railway.app/status`);
 });
