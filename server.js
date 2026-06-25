@@ -1,210 +1,122 @@
 const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
-
 const app = express();
-const server = http.createServer(app);
-
-// Configurar CORS
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST']
-}));
-
-// Servir arquivos estáticos
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Socket.IO com CORS
-const io = socketIo(server, {
+const http = require('http').createServer(app);
+const io = require('socket.io')(http, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['websocket', 'polling']
 });
 
-// Rotas
+app.use(express.static('public'));
+
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.send(`
+    <html>
+      <head><title>WebRTC Server</title></head>
+      <body style="background:#0a0a1a;color:#fff;font-family:Arial;display:flex;justify-content:center;align-items:center;height:100vh;text-align:center;">
+        <div>
+          <h1>🎤 Batalha WebRTC</h1>
+          <p style="color:#00ff88;">✅ Servidor rodando!</p>
+          <p style="color:#666;font-size:12px;">Socket.IO ativo</p>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
 app.get('/status', (req, res) => {
   res.json({
     status: 'online',
-    salas: Object.keys(salas).length,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    salas: Object.keys(salas).length
   });
 });
 
-// Armazenar salas
 const salas = {};
 
-// WebRTC - Sinalização via Socket.IO
 io.on('connection', (socket) => {
-  console.log(`🟢 Usuário conectado: ${socket.id}`);
+  console.log('🟢 Conectado:', socket.id);
+  socket.emit('conectado', { status: 'ok', id: socket.id });
 
-  // Criar ou entrar em uma sala
   socket.on('entrar_sala', (data) => {
-    const { desafio_id, usuario_id, nome } = data;
-    const roomName = `batalha_${desafio_id}`;
+    const room = `batalha_${data.desafio_id}`;
+    socket.join(room);
+    socket.room = room;
+    socket.user = data;
     
-    socket.join(roomName);
-    socket.roomName = roomName;
-    socket.usuario_id = usuario_id;
-    socket.nome = nome;
-
-    // Inicializar sala se não existir
-    if (!salas[roomName]) {
-      salas[roomName] = {
-        users: {},
-        offer: null,
-        answer: null,
-        offerFrom: null,
-        answerFrom: null
-      };
-    }
-
-    // Adicionar usuário
-    salas[roomName].users[socket.id] = {
-      usuario_id,
-      nome,
-      socket_id: socket.id
-    };
-
-    // Notificar outros usuários
-    socket.to(roomName).emit('usuario_entrou', {
-      usuario_id,
-      nome,
-      socket_id: socket.id
-    });
-
-    // Enviar lista de usuários para o novo usuário
-    const usuarios = Object.values(salas[roomName].users);
+    if (!salas[room]) salas[room] = { users: {}, offer: null };
+    salas[room].users[socket.id] = data;
+    
+    const usuarios = Object.values(salas[room].users);
     socket.emit('usuarios_na_sala', usuarios);
-
-    console.log(`📥 ${nome} entrou na sala ${roomName}`);
-    console.log(`👥 Usuários na sala: ${usuarios.length}`);
+    socket.to(room).emit('usuario_entrou', data);
+    
+    console.log(`📥 ${data.nome} entrou na sala ${room}`);
   });
 
-  // WebRTC: Offer (quem inicia a chamada)
   socket.on('webrtc_offer', (data) => {
-    const { offer, target_id } = data;
-    const roomName = socket.roomName;
-
-    if (roomName && salas[roomName]) {
-      // Salvar offer
-      salas[roomName].offer = offer;
-      salas[roomName].offerFrom = socket.id;
-
-      // Enviar para o alvo específico
-      io.to(target_id).emit('webrtc_offer_received', {
-        offer: offer,
+    const room = socket.room;
+    if (room && salas[room]) {
+      salas[room].offer = data.offer;
+      salas[room].offerFrom = socket.id;
+      socket.to(room).emit('webrtc_offer_received', {
+        offer: data.offer,
         from_id: socket.id,
-        from_nome: socket.nome
+        from_nome: socket.user?.nome || 'Desconhecido'
       });
-
-      console.log(`📤 Offer enviado de ${socket.nome} para ${target_id}`);
     }
   });
 
-  // WebRTC: Answer (quem responde)
   socket.on('webrtc_answer', (data) => {
-    const { answer, target_id } = data;
-    const roomName = socket.roomName;
-
-    if (roomName && salas[roomName]) {
-      // Salvar answer
-      salas[roomName].answer = answer;
-      salas[roomName].answerFrom = socket.id;
-
-      // Enviar para o alvo
-      io.to(target_id).emit('webrtc_answer_received', {
-        answer: answer,
+    const room = socket.room;
+    if (room) {
+      socket.to(room).emit('webrtc_answer_received', {
+        answer: data.answer,
         from_id: socket.id,
-        from_nome: socket.nome
+        from_nome: socket.user?.nome || 'Desconhecido'
       });
-
-      console.log(`📥 Answer enviado de ${socket.nome} para ${target_id}`);
     }
   });
 
-  // WebRTC: ICE Candidate
   socket.on('webrtc_ice_candidate', (data) => {
-    const { candidate, target_id } = data;
-    const roomName = socket.roomName;
-
-    if (roomName && salas[roomName]) {
-      // Enviar para todos na sala menos para o remetente
-      socket.to(roomName).emit('webrtc_ice_candidate_received', {
-        candidate: candidate,
+    const room = socket.room;
+    if (room) {
+      socket.to(room).emit('webrtc_ice_candidate_received', {
+        candidate: data.candidate,
         from_id: socket.id
       });
     }
   });
 
-  // Solicitar offer existente
   socket.on('get_offer', () => {
-    const roomName = socket.roomName;
-    if (roomName && salas[roomName] && salas[roomName].offer) {
+    const room = socket.room;
+    if (room && salas[room] && salas[room].offer) {
       socket.emit('offer_received', {
-        offer: salas[roomName].offer,
-        from_id: salas[roomName].offerFrom
+        offer: salas[room].offer,
+        from_id: salas[room].offerFrom
       });
     }
   });
 
-  // Sair da sala
-  socket.on('sair_sala', () => {
-    const roomName = socket.roomName;
-    if (roomName && salas[roomName]) {
-      // Remover usuário
-      delete salas[roomName].users[socket.id];
-      
-      // Notificar outros
-      socket.to(roomName).emit('usuario_saiu', {
-        socket_id: socket.id,
-        nome: socket.nome
-      });
-
-      // Se não houver mais usuários, remover sala
-      if (Object.keys(salas[roomName].users).length === 0) {
-        delete salas[roomName];
-        console.log(`🗑️ Sala ${roomName} removida`);
-      }
-    }
-    socket.leave(roomName);
-    console.log(`🔴 Usuário ${socket.id} saiu`);
-  });
-
-  // Desconexão
   socket.on('disconnect', () => {
-    const roomName = socket.roomName;
-    if (roomName && salas[roomName]) {
-      // Remover usuário
-      delete salas[roomName].users[socket.id];
-      
-      // Notificar outros
-      socket.to(roomName).emit('usuario_saiu', {
-        socket_id: socket.id,
-        nome: socket.nome
+    const room = socket.room;
+    if (room && salas[room]) {
+      delete salas[room].users[socket.id];
+      socket.to(room).emit('usuario_saiu', { 
+        socket_id: socket.id, 
+        nome: socket.user?.nome || 'Usuário' 
       });
-
-      // Se não houver mais usuários, remover sala
-      if (Object.keys(salas[roomName].users).length === 0) {
-        delete salas[roomName];
-        console.log(`🗑️ Sala ${roomName} removida`);
+      if (Object.keys(salas[room].users).length === 0) {
+        delete salas[room];
       }
     }
-    console.log(`🔴 Usuário ${socket.id} desconectado`);
+    console.log('🔴 Desconectado:', socket.id);
   });
 });
 
-// Porta do servidor
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+http.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`📡 URL: http://localhost:${PORT}`);
-  console.log(`📡 Status: http://localhost:${PORT}/status`);
 });
