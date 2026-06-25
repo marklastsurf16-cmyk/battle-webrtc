@@ -1,7 +1,7 @@
 {
-  "name": "batalha-webrtc",
+  "name": "battle-webrtc",
   "version": "1.0.0",
-  "description": "Servidor WebRTC para batalha de rimas",
+  "description": "Servidor WebRTC para batalha de rimas em tempo real",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,5 +10,8 @@
     "express": "^4.18.2",
     "socket.io": "^4.6.1",
     "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
